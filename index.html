@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Văn phòng AI — Bộ mô hình 3D (bản xem trước)</title>
+<style>
+  html,body{margin:0;height:100%;background:#f2f7fa;font-family:Arial,"Segoe UI",sans-serif;overflow:hidden}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+  .panel{position:fixed;left:14px;top:14px;background:rgba(255,255,255,.88);border:1px solid #cfe3ec;border-radius:14px;padding:10px 14px;color:#17455c;max-width:min(430px,86vw);backdrop-filter:blur(4px)}
+  .panel h1{font-size:17px;margin:0 0 4px}
+  .panel p{font-size:12.5px;margin:2px 0;line-height:1.45}
+  .panel b{color:#0f7c8c}
+  #stats{position:fixed;right:14px;bottom:14px;background:rgba(255,255,255,.88);border:1px solid #cfe3ec;border-radius:12px;padding:8px 12px;color:#17455c;font-size:12px;line-height:1.5;max-width:min(360px,86vw)}
+  .hint{position:fixed;left:14px;bottom:14px;background:rgba(255,255,255,.8);border-radius:10px;padding:6px 10px;color:#40677c;font-size:12px}
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "./three.module.js",
+    "three/addons/": "./addons/"
+} }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div class="panel">
+  <h1>🏢 Văn phòng AI — Bộ mô hình 3D</h1>
+  <p>Bản <b>xem trước</b> phong cách low-poly (nền sáng, xanh dương/teal) — chưa tích hợp vào app chính.</p>
+  <p>Gồm: <b>10 nhân viên</b> theo vai trò · <b>3 kiểu nhà</b> · <b>4 loại cây</b> · <b>3 con vật</b>.</p>
+</div>
+<div class="hint">🖱️ Kéo để xoay · Cuộn để zoom · Chuột phải để dời cảnh</div>
+<div id="stats">Đang tải…</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { buildPerson, ROLES, buildBuilding, buildTower, buildCafe, buildTree, buildPhoenixTree, buildCoconut, buildBanyan, buildCat, buildDog, buildBird, countStats, PAL } from "./models.js";
+
+const params = new URLSearchParams(location.search);
+const shot = params.get("shot") || "all";
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.querySelector("#app").appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf2f7fa);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xcfe4ee, 1.05));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+sun.position.set(14, 20, 12);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
+sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({ color: 0xe6eff4, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+const plaza = new THREE.Mesh(new THREE.CircleGeometry(13.5, 40), new THREE.MeshStandardMaterial({ color: 0xdcebf2, roughness: 1 }));
+plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.01; plaza.receiveShadow = true;
+scene.add(plaza);
+
+function makeLabel(name, title) {
+  const cv = document.createElement("canvas"); cv.width = 512; cv.height = 168;
+  const c = cv.getContext("2d");
+  c.fillStyle = "rgba(255,255,255,0.92)";
+  c.beginPath(); c.roundRect(6, 6, 500, 156, 28); c.fill();
+  c.strokeStyle = "#9fc6d8"; c.lineWidth = 4; c.stroke();
+  c.fillStyle = "#0f5b6b"; c.font = "bold 56px Arial"; c.textAlign = "center";
+  c.fillText(name, 256, 74);
+  c.fillStyle = "#40677c"; c.font = "38px Arial";
+  c.fillText(title, 256, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(2.0, 0.656, 1);
+  return sp;
+}
+
+const groups = { staff: new THREE.Group(), buildings: new THREE.Group(), trees: new THREE.Group(), animals: new THREE.Group() };
+
+/* Nhà — hàng sau */
+const tower = buildTower(); tower.position.set(-8.2, 0, -7.5); groups.buildings.add(tower);
+const house = buildBuilding(); house.position.set(0, 0, -8); groups.buildings.add(house);
+const cafe = buildCafe(); cafe.position.set(8.2, 0, -7.5); groups.buildings.add(cafe);
+
+/* Cây — hai bên + xen giữa */
+const treeDefs = [
+  [buildPhoenixTree, -11.5, -3.2], [buildTree, 5.9, -3.4], [buildCoconut, 11.8, -3.0],
+  [buildBanyan, -6.2, -3.6], [buildTree, -13.5, 1.5], [buildPhoenixTree, 13.8, 1.2]
+];
+for (const [fn, x, z] of treeDefs) { const t = fn(); t.position.set(x, 0, z); groups.trees.add(t); }
+
+/* Nhân viên — hàng trước, kèm nhãn tên */
+ROLES.slice(0, 10).forEach((role, i) => {
+  const p = buildPerson(role.cfg);
+  const x = -10.5 + i * 2.33;
+  p.position.set(x, 0, 3.4);
+  p.rotation.y = 0.06 * Math.sin(i * 1.7);
+  const label = makeLabel(role.name, role.title);
+  label.position.set(x, 3.55, 3.4);
+  groups.staff.add(p); groups.staff.add(label);
+});
+
+/* Con vật — phía trước, tỉ lệ đã thu nhỏ theo góp ý */
+const cat = buildCat(); cat.scale.setScalar(0.45); cat.position.set(3.2, 0, 6.4); cat.rotation.y = -0.3; groups.animals.add(cat);
+const dog = buildDog(); dog.scale.setScalar(0.8); dog.position.set(5.6, 0, 6.1); dog.rotation.y = 0.5; groups.animals.add(dog);
+const bird = buildBird(); bird.position.set(-4.6, 0, 6.2); groups.animals.add(bird);
+
+for (const g of Object.values(groups)) scene.add(g);
+
+/* Số liệu mesh/tri */
+const stats = {};
+for (const [k, g] of Object.entries(groups)) stats[k] = countStats(g);
+stats.total = Object.values(stats).reduce((a, s) => ({ meshes: a.meshes + s.meshes, triangles: a.triangles + s.triangles }), { meshes: 0, triangles: 0 });
+document.querySelector("#stats").innerHTML =
+  `Nhân viên: <b>${stats.staff.meshes}</b> mesh · Nhà: <b>${stats.buildings.meshes}</b> · Cây: <b>${stats.trees.meshes}</b> · Thú: <b>${stats.animals.meshes}</b><br>Tổng cảnh: <b>${stats.total.meshes} mesh / ${stats.total.triangles.toLocaleString("vi-VN")} tam giác</b>`;
+window.__stats = stats;
+
+/* Camera + điều khiển. Chế độ ?shot=<nhóm>: chỉ hiện nhóm đó + tự đóng khung (phục vụ chụp kiểm tra) */
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+const shotGroup = { staff: groups.staff, buildings: groups.buildings, trees: groups.trees, animals: groups.animals }[shot];
+if (shotGroup) {
+  for (const g of Object.values(groups)) g.visible = (g === shotGroup);
+  document.querySelector(".panel").style.display = "none";
+  document.querySelector(".hint").style.display = "none";
+  const b = new THREE.Box3().setFromObject(shotGroup);
+  const c = b.getCenter(new THREE.Vector3());
+  const r = b.getSize(new THREE.Vector3()).length() / 2;
+  const fovV = THREE.MathUtils.degToRad(camera.fov);
+  const fovH = 2 * Math.atan(Math.tan(fovV / 2) * camera.aspect);
+  const zoomF = { staff: 0.88, buildings: 0.8, trees: 0.8, animals: 0.75 }[shot] ?? 1.02;
+  const dist = r / Math.sin(Math.min(fovV, fovH) / 2) * zoomF;
+  const dir = new THREE.Vector3(0.5, 0.35, 1).normalize();
+  camera.position.copy(c).addScaledVector(dir, dist);
+  camera.lookAt(c);
+  var shotTarget = c;
+}
+const views = { all: { pos: [13, 8, 19], tgt: [0, 1.8, 0] } };
+const v = views.all;
+if (!shotGroup) camera.position.set(...v.pos);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(shotGroup ? shotTarget : new THREE.Vector3(...v.tgt));
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 3; controls.maxDistance = 60;
+controls.autoRotate = !params.has("shot");
+controls.autoRotateSpeed = 0.7;
+controls.update();
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+window.__ready = true;
+</script>
+</body>
+</html>
